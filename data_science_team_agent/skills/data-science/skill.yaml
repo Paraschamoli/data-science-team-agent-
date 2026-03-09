@@ -1,0 +1,221 @@
+id: data-science-v1
+name: data-science
+version: 1.0.0
+author: paras@getbindu.com
+
+# Description
+description: |
+  Comprehensive AI-powered data science team that performs end-to-end data analysis,
+  exploratory data analysis, data visualization, machine learning, and statistical analysis.
+  Handles data loading, cleaning, preprocessing, modeling, and generating actionable insights.
+
+# Tags and Modes
+tags:
+  - data-science
+  - data-analysis
+  - exploratory-data-analysis
+  - machine-learning
+  - data-visualization
+  - statistical-analysis
+  - data-cleaning
+  - pandas
+  - python
+
+input_modes:
+  - text/plain
+  - application/json
+
+output_modes:
+  - text/plain
+  - application/json
+  - text/markdown
+
+# Example Queries
+examples:
+  - "Analyze this dataset: https://example.com/data.csv and provide insights"
+  - "Perform exploratory data analysis on my sales data"
+  - "Help me clean and preprocess this dataset for machine learning"
+  - "Create visualizations for customer behavior data"
+  - "Build a predictive model for house price prediction"
+  - "Explain how to handle missing values in a dataset"
+  - "Generate a comprehensive data analysis report"
+
+# Detailed Capabilities
+capabilities_detail:
+  primary_capability:
+    supported: true
+    description: "Comprehensive data analysis and machine learning pipeline"
+    features:
+      - "Data loading from various sources (CSV, URLs, databases)"
+      - "Data cleaning and preprocessing (missing values, outliers, duplicates)"
+      - "Exploratory data analysis with descriptive statistics"
+      - "Data visualization and plotting recommendations"
+      - "Feature engineering and selection for ML"
+      - "Machine learning model development and evaluation"
+      - "Statistical analysis and hypothesis testing"
+      - "Comprehensive reporting with actionable insights"
+    limitations: "Requires internet access for URL-based data loading; large datasets may need sampling"
+
+  secondary_capability:
+    supported: true
+    description: "Data science guidance and education"
+    features:
+      - "Step-by-step methodology explanations"
+      - "Best practices for data science workflows"
+      - "Code examples and tutorials"
+      - "Error handling and troubleshooting guidance"
+      - "Recommendations for tools and libraries"
+
+# Requirements
+requirements:
+  packages:
+    - "pandas>=2.0.0"
+    - "numpy>=1.24.0"
+    - "plotly>=5.0.0"
+    - "scikit-learn>=1.3.0"
+    - "openai>=2.11.0"
+    - "httpx>=0.28.1"
+    - "python-dotenv>=1.0.1"
+  system:
+    - "Internet access for URL data loading"
+    - "Python 3.12+"
+  min_memory_mb: 512
+  external_services:
+    - OpenRouter API for LLM capabilities
+
+# Performance Metrics
+performance:
+  avg_processing_time_ms: 3000
+  avg_time_per_analysis_ms: 2000
+  max_concurrent_requests: 5
+  memory_per_request_mb: 512
+  timeout_seconds: 120
+  scalability: horizontal
+
+# Tool Restrictions
+allowed_tools:
+  - pandas
+  - numpy
+  - plotly
+  - scikit-learn
+  - OpenAI API
+
+# Rich Documentation
+documentation:
+  overview: |
+    AI-powered data science team that provides comprehensive data analysis capabilities.
+    Combines automated data processing with intelligent insights generation to deliver
+    professional-grade data science workflows and recommendations.
+
+  key_features:
+    - "Automated data loading from multiple sources"
+    - "Intelligent data cleaning and preprocessing"
+    - "Comprehensive exploratory data analysis"
+    - "Advanced visualization recommendations"
+    - "Machine learning pipeline development"
+    - "Statistical analysis and hypothesis testing"
+    - "Professional reporting with actionable insights"
+
+  use_cases:
+    - "Business data analysis and reporting"
+    - "Machine learning model development"
+    - "Data quality assessment and cleaning"
+    - "Exploratory analysis for new datasets"
+    - "Statistical research and validation"
+    - "Data science education and guidance"
+
+  methodology:
+    - "Data Loading: Support for CSV, URLs, and various data formats"
+    - "Data Inspection: Comprehensive data quality assessment"
+    - "Data Cleaning: Automated missing value handling and outlier detection"
+    - "Exploratory Analysis: Statistical summaries and correlation analysis"
+    - "Visualization: Plot recommendations and code generation"
+    - "Modeling: Feature engineering and ML model development"
+    - "Reporting: Professional insights and recommendations"
+
+  input_format:
+    - "Plain text requests for data science tasks"
+    - "URLs to datasets for analysis"
+    - "Specific questions about data science methodologies"
+    - "Code review and optimization requests"
+
+  output_format:
+    - "Structured analysis reports with executive summaries"
+    - "Step-by-step methodology explanations"
+    - "Python code examples and best practices"
+    - "Visualization recommendations and code"
+    - "Statistical insights and interpretations"
+    - "Actionable recommendations and next steps"
+
+  limitations:
+    - "Large datasets may require sampling for processing"
+    - "Real-time data streaming not supported"
+    - "Advanced ML models may require specialized hardware"
+    - "Proprietary database connections need custom configuration"
+
+  best_practices:
+    - "Always validate data quality before analysis"
+    - "Use appropriate statistical methods for data types"
+    - "Document methodology and assumptions clearly"
+    - "Validate models with proper train/test splits"
+    - "Consider ethical implications of data analysis"
+    - "Provide reproducible code and clear documentation"
+
+  installation: |
+    Dependencies are automatically installed with the agent.
+    No additional setup required for basic functionality.
+
+    Optional dependencies for enhanced features:
+    - matplotlib for additional plotting options
+    - seaborn for statistical visualizations
+    - jupyter for interactive analysis
+
+  versioning:
+    - version: "1.0.0"
+      date: "2024-03-09"
+      changes: "Initial release with core data science capabilities"
+
+# Assessment fields for skill negotiation
+assessment:
+  keywords:
+    - "data analysis"
+    - "exploratory data analysis"
+    - "machine learning"
+    - "data visualization"
+    - "statistical analysis"
+    - "data cleaning"
+    - "pandas"
+    - "python"
+    - "data science"
+    - "data preprocessing"
+
+  specializations:
+    - domain: "data-analysis"
+      confidence_boost: 0.4
+    - domain: "machine-learning"
+      confidence_boost: 0.3
+    - domain: "statistical-analysis"
+      confidence_boost: 0.3
+
+  anti_patterns:
+    - "Real-time trading or financial advice"
+    - "Medical diagnosis or healthcare recommendations"
+    - "Legal advice or regulatory compliance"
+    - "Security analysis or penetration testing"
+
+  complexity_indicators:
+    simple:
+      - "explain data science concept"
+      - "how to load data"
+      - "basic statistics"
+      - "data cleaning tips"
+    medium:
+      - "analyze my dataset"
+      - "create visualizations"
+      - "feature engineering"
+      - "model evaluation"
+    complex:
+      - "build ML pipeline"
+      - "advanced statistical analysis"
+      - "comprehensive data report"
+      - "optimize model performance"

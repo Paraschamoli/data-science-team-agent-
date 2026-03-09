@@ -1,0 +1,405 @@
+from langchain.tools import tool
+
+import pandas as pd
+import os
+from pathlib import Path
+
+from typing_extensions import Tuple, List, Dict, Optional
+
+ALLOW_UNSAFE_PICKLE_ENV_VAR = "ALLOW_UNSAFE_PICKLE"
+DEFAULT_MAX_MB = 20  # cap file size we attempt to load
+DEFAULT_MAX_ROWS = 5000  # cap rows read per file to avoid OOM
+DEFAULT_MAX_ENTRIES = 1000  # cap directory recursion output
+DEFAULT_MAX_DEPTH = 5  # cap directory recursion depth
+
+
+def _pickle_loading_allowed() -> bool:
+    """
+    Pickle deserialization executes arbitrary code.
+    This helper enforces an explicit opt-in via env var to avoid RCE on untrusted data.
+    """
+    return os.getenv(ALLOW_UNSAFE_PICKLE_ENV_VAR, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+@tool(response_format="content_and_artifact")
+def load_directory(
+    directory_path: str = os.getcwd(),
+    file_type: Optional[str] = None,
+    max_mb: int = DEFAULT_MAX_MB,
+    max_rows: int = DEFAULT_MAX_ROWS,
+) -> Tuple[str, Dict]:
+    """
+    Tool: load_directory
+    Description: Loads (reads) all recognized tabular files in a directory into memory.
+                 If you only need filenames (a directory listing), use
+                 `list_directory_contents` or `search_files_by_pattern` instead.
+                 If file_type is specified (e.g., 'csv'), only files
+                 with that extension are loaded.
+
+    Parameters:
+    ----------
+    directory_path : str
+        The path to the directory to load. Defaults to the current working directory.
+
+    file_type : str, optional
+        The extension of the file type you want to load exclusively
+        (e.g., 'csv', 'xlsx', 'parquet'). If None or not provided,
+        attempts to load all recognized tabular files.
+
+    Returns:
+    -------
+    Tuple[str, Dict]
+        A tuple containing a message and a dictionary of data frames.
+    """
+    print(f"    * Tool: load_directory | {directory_path}")
+
+    import os
+    import pandas as pd
+
+    if directory_path is None:
+        return "No directory path provided.", {}
+
+    try:
+        base_path = Path(directory_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid directory path: {exc}", {}
+
+    if not base_path.is_dir():
+        return f"Directory not found: {base_path}", {}
+
+    data_frames: Dict[str, Dict] = {}
+    max_bytes = max_mb * 1024 * 1024 if max_mb else None
+
+    for filename in sorted(os.listdir(base_path)):
+        file_path = base_path / filename
+
+        # Skip directories
+        if file_path.is_dir():
+            continue
+
+        # If file_type is specified, only process files that match.
+        if file_type:
+            # Make sure extension check is case-insensitive
+            if not filename.lower().endswith(f".{file_type.lower()}"):
+                continue
+
+        if max_bytes is not None and file_path.stat().st_size > max_bytes:
+            data_frames[filename] = {
+                "status": "skipped",
+                "data": None,
+                "error": f"Skipped: file larger than {max_mb}MB",
+            }
+            continue
+
+        try:
+            df, error = _load_file_safe(file_path, max_rows)
+            if error:
+                data_frames[filename] = {
+                    "status": "error",
+                    "data": None,
+                    "error": error,
+                }
+            else:
+                data_frames[filename] = {
+                    "status": "loaded",
+                    "data": df.to_dict() if df is not None else None,
+                    "shape": df.shape if df is not None else None,
+                }
+        except Exception as exc:
+            data_frames[filename] = {
+                "status": "error",
+                "data": None,
+                "error": f"Error loading {filename}: {exc}",
+            }
+
+    message = f"Loaded {len([f for f in data_frames.values() if f['status'] == 'loaded'])} files from {directory_path}"
+    return message, data_frames
+
+
+@tool(response_format="content_and_artifact")
+def load_file(
+    file_path: str,
+    max_rows: int = DEFAULT_MAX_ROWS,
+) -> Tuple[str, Dict]:
+    """
+    Tool: load_file
+    Description: Loads (reads) a single recognized tabular file into memory.
+
+    Parameters:
+    ----------
+    file_path : str
+        The path to the file to load.
+
+    max_rows : int, optional
+        Maximum number of rows to read. Defaults to 5000.
+
+    Returns:
+    -------
+    Tuple[str, Dict]
+        A tuple containing a message and the loaded data.
+    """
+    print(f"    * Tool: load_file | {file_path}")
+
+    try:
+        path = Path(file_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid file path: {exc}", {}
+
+    if not path.is_file():
+        return f"File not found: {path}", {}
+
+    try:
+        df, error = _load_file_safe(path, max_rows)
+        if error:
+            return f"Error loading file: {error}", {}
+        else:
+            message = f"Successfully loaded {path.name} with shape {df.shape}"
+            return message, {"data": df.to_dict(), "shape": df.shape}
+    except Exception as exc:
+        return f"Error loading {file_path}: {exc}", {}
+
+
+@tool
+def list_directory_contents(
+    directory_path: str = os.getcwd(),
+    max_entries: int = DEFAULT_MAX_ENTRIES,
+) -> str:
+    """
+    Tool: list_directory_contents
+    Description: Lists the contents of a directory without loading any files.
+
+    Parameters:
+    ----------
+    directory_path : str
+        The path to the directory to list. Defaults to the current working directory.
+
+    max_entries : int, optional
+        Maximum number of entries to return. Defaults to 1000.
+
+    Returns:
+    -------
+    str
+        A formatted listing of directory contents.
+    """
+    print(f"    * Tool: list_directory_contents | {directory_path}")
+
+    try:
+        base_path = Path(directory_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid directory path: {exc}"
+
+    if not base_path.is_dir():
+        return f"Directory not found: {base_path}"
+
+    try:
+        entries = []
+        for entry in sorted(os.listdir(base_path))[:max_entries]:
+            entry_path = base_path / entry
+            if entry_path.is_dir():
+                entries.append(f"📁 {entry}/")
+            else:
+                size = entry_path.stat().st_size
+                entries.append(f"📄 {entry} ({size:,} bytes)")
+        
+        return "\n".join(entries)
+    except Exception as exc:
+        return f"Error listing directory: {exc}"
+
+
+@tool
+def list_directory_recursive(
+    directory_path: str = os.getcwd(),
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    max_entries: int = DEFAULT_MAX_ENTRIES,
+) -> str:
+    """
+    Tool: list_directory_recursive
+    Description: Recursively lists directory contents up to a maximum depth.
+
+    Parameters:
+    ----------
+    directory_path : str
+        The path to the directory to list. Defaults to the current working directory.
+
+    max_depth : int, optional
+        Maximum recursion depth. Defaults to 5.
+
+    max_entries : int, optional
+        Maximum number of entries to return. Defaults to 1000.
+
+    Returns:
+    -------
+    str
+        A formatted recursive listing of directory contents.
+    """
+    print(f"    * Tool: list_directory_recursive | {directory_path}")
+
+    try:
+        base_path = Path(directory_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid directory path: {exc}"
+
+    if not base_path.is_dir():
+        return f"Directory not found: {base_path}"
+
+    def _list_recursive(path, depth, entries):
+        if depth > max_depth or len(entries) >= max_entries:
+            return
+        
+        try:
+            for entry in sorted(os.listdir(path)):
+                if len(entries) >= max_entries:
+                    break
+                    
+                entry_path = path / entry
+                indent = "  " * depth
+                
+                if entry_path.is_dir():
+                    entries.append(f"{indent}📁 {entry}/")
+                    _list_recursive(entry_path, depth + 1, entries)
+                else:
+                    size = entry_path.stat().st_size
+                    entries.append(f"{indent}📄 {entry} ({size:,} bytes)")
+        except:
+            pass
+
+    entries = []
+    _list_recursive(base_path, 0, entries)
+    
+    return "\n".join(entries)
+
+
+@tool
+def get_file_info(file_path: str) -> str:
+    """
+    Tool: get_file_info
+    Description: Gets detailed information about a specific file.
+
+    Parameters:
+    ----------
+    file_path : str
+        The path to the file to get information about.
+
+    Returns:
+    -------
+    str
+        Detailed file information.
+    """
+    print(f"    * Tool: get_file_info | {file_path}")
+
+    try:
+        path = Path(file_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid file path: {exc}"
+
+    if not path.is_file():
+        return f"File not found: {path}"
+
+    try:
+        stat = path.stat()
+        info = [
+            f"File: {path.name}",
+            f"Size: {stat.st_size:,} bytes",
+            f"Modified: {pd.Timestamp.fromtimestamp(stat.st_mtime)}",
+            f"Type: {path.suffix or 'no extension'}",
+        ]
+        
+        # Try to detect if it's a tabular file
+        tabular_extensions = {'.csv', '.xlsx', '.xls', '.parquet', '.json', '.tsv'}
+        if path.suffix.lower() in tabular_extensions:
+            info.append("Tabular file: ✅")
+        else:
+            info.append("Tabular file: ❌")
+        
+        return "\n".join(info)
+    except Exception as exc:
+        return f"Error getting file info: {exc}"
+
+
+@tool
+def search_files_by_pattern(
+    pattern: str,
+    directory_path: str = os.getcwd(),
+    max_entries: int = DEFAULT_MAX_ENTRIES,
+) -> str:
+    """
+    Tool: search_files_by_pattern
+    Description: Searches for files matching a pattern in a directory.
+
+    Parameters:
+    ----------
+    pattern : str
+        The pattern to search for (supports wildcards like *.csv).
+
+    directory_path : str, optional
+        The directory to search in. Defaults to the current working directory.
+
+    max_entries : int, optional
+        Maximum number of entries to return. Defaults to 1000.
+
+    Returns:
+    -------
+    str
+        Files matching the pattern.
+    """
+    print(f"    * Tool: search_files_by_pattern | {pattern} in {directory_path}")
+
+    try:
+        base_path = Path(directory_path).expanduser().resolve()
+    except Exception as exc:
+        return f"Invalid directory path: {exc}"
+
+    if not base_path.is_dir():
+        return f"Directory not found: {base_path}"
+
+    try:
+        from glob import glob
+        search_pattern = str(base_path / pattern)
+        matches = glob(search_pattern)[:max_entries]
+        
+        if not matches:
+            return f"No files found matching pattern: {pattern}"
+        
+        results = []
+        for match in matches:
+            path = Path(match)
+            if path.is_file():
+                size = path.stat().st_size
+                results.append(f"📄 {path.name} ({size:,} bytes)")
+        
+        return f"Found {len(results)} files matching '{pattern}':\n" + "\n".join(results)
+    except Exception as exc:
+        return f"Error searching files: {exc}"
+
+
+def _load_file_safe(file_path: Path, max_rows: int = DEFAULT_MAX_ROWS) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Safely load a file with proper error handling."""
+    suffix = file_path.suffix.lower()
+    
+    try:
+        if suffix == '.csv':
+            df = pd.read_csv(file_path, nrows=max_rows)
+        elif suffix in ['.xlsx', '.xls']:
+            df = pd.read_excel(file_path, nrows=max_rows)
+        elif suffix == '.parquet':
+            df = pd.read_parquet(file_path)
+        elif suffix == '.json':
+            df = pd.read_json(file_path, nrows=max_rows)
+        elif suffix == '.tsv':
+            df = pd.read_csv(file_path, sep='\t', nrows=max_rows)
+        elif suffix == '.pkl':
+            if not _pickle_loading_allowed():
+                return None, "Pickle loading not allowed (set ALLOW_UNSAFE_PICKLE=1 to enable)"
+            df = pd.read_pickle(file_path)
+        else:
+            return None, f"Unsupported file type: {suffix}"
+        
+        return df, None
+    except Exception as exc:
+        return None, f"Error reading {file_path.name}: {exc}"

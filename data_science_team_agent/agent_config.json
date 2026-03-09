@@ -1,0 +1,43 @@
+{
+    "author": "paras@getbindu.com",
+    "name": "data-science-team-agent",
+    "description": "AI Data Science Team is a Python library of specialized agents for common data science workflows, plus a flagship app: AI Pipeline Studio. The Studio turns your work into a visual, reproducible pipeline, while the AI team handles data loading, cleaning, visualization, and modeling.",
+    "version": "1.0.0",
+    "recreate_keys": false,
+    
+    "skills": [
+      
+      
+        "skills/data-science"
+      
+    ],
+    
+    "capabilities": {
+    },
+    
+
+    "agent_trust": "low",
+    "debug_mode": true,
+    "debug_level": 2,
+    
+    "deployment": {
+        "url": "http://0.0.0.0:3773",
+        "expose": true,
+        "protocol_version": "1.0.0",
+        "proxy_urls": ["0.0.0.0"],
+        "cors_origins": ["*"]
+    },
+    "num_history_sessions": 5,
+    "environment_variables": [
+      {
+        "key": "OPENROUTER_API_KEY",
+        "description": "OpenRouter API key for LLM calls",
+        "required": true
+      },
+      {
+        "key": "MEM0_API_KEY",
+        "description": "Mem0 API key for memory operations",
+        "required": false
+      }
+    ]
+  }
