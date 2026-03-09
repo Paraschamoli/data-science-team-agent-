@@ -1,37 +1,40 @@
-from typing_extensions import TypedDict, Annotated, Sequence, Literal
+"""Feature engineering agent for creating new features from existing data."""
+
 import operator
-from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import BaseMessage
-from langgraph.types import Command
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Checkpointer
 import os
-import json
+from collections.abc import Sequence
+from typing import Annotated
+
 import pandas as pd
-from data_science_team_agent.templates import (
-    node_func_human_review,
-    node_func_fix_agent_code,
-    node_func_report_agent_outputs,
-    create_coding_agent_graph,
-    BaseAgent,
-)
+from langchain_core.messages import BaseMessage  # type: ignore[import]
+from langchain_core.prompts import PromptTemplate  # type: ignore[import]
+from langgraph.checkpoint.memory import MemorySaver  # type: ignore[import]
+from langgraph.graph import END, START, StateGraph  # type: ignore[import]
+from langgraph.types import Checkpointer  # type: ignore[import]
+from typing_extensions import TypedDict
+
 from data_science_team_agent.parsers.parsers import PythonOutputParser
+from data_science_team_agent.templates import (
+    BaseAgent,
+    node_func_report_agent_outputs,
+)
+from data_science_team_agent.tools.dataframe import get_dataframe_summary
+from data_science_team_agent.utils.logging import log_ai_function
 from data_science_team_agent.utils.regex import (
-    relocate_imports_inside_function,
     add_comments_to_top,
     format_agent_name,
     format_recommended_steps,
-    get_generic_summary,
+    relocate_imports_inside_function,
 )
-from data_science_team_agent.tools.dataframe import get_dataframe_summary
-from data_science_team_agent.utils.logging import log_ai_function, log_ai_error
 from data_science_team_agent.utils.sandbox import run_code_sandboxed_subprocess
-from data_science_team_agent.utils.messages import get_last_user_message_content
 
 AGENT_NAME = "feature_engineering_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
+
 class FeatureEngineeringAgent(BaseAgent):
+    """Agent responsible for creating new features from existing data."""
+
     def __init__(
         self,
         model,
@@ -44,8 +47,24 @@ class FeatureEngineeringAgent(BaseAgent):
         human_in_the_loop=False,
         bypass_recommended_steps=False,
         bypass_explain_code=False,
-        checkpointer: Checkpointer = None,
+        **kwargs,
     ):
+        """Initialize the feature engineering agent.
+
+        Args:
+            model: The language model to use.
+            n_samples: Number of samples to generate.
+            log: Whether to log output.
+            log_path: Path to log file.
+            file_name: Name of the generated file.
+            function_name: Name of the generated function.
+            overwrite: Whether to overwrite existing files.
+            human_in_the_loop: Whether to enable human-in-the-loop.
+            bypass_recommended_steps: Whether to bypass recommended steps.
+            bypass_explain_code: Whether to bypass code explanation.
+            **kwargs: Additional keyword arguments.
+
+        """
         self._params = {
             "model": model,
             "n_samples": n_samples,
@@ -57,7 +76,7 @@ class FeatureEngineeringAgent(BaseAgent):
             "human_in_the_loop": human_in_the_loop,
             "bypass_recommended_steps": bypass_recommended_steps,
             "bypass_explain_code": bypass_explain_code,
-            "checkpointer": checkpointer,
+            "checkpointer": None,  # Add checkpointer to params
         }
         self._compiled_graph = self._make_compiled_graph()
         self.response = None
@@ -65,12 +84,26 @@ class FeatureEngineeringAgent(BaseAgent):
     def invoke_agent(
         self,
         data_raw: pd.DataFrame,
-        target_variable: str = None,
-        user_instructions: str = None,
+        target_variable: str | None = None,
+        user_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         **kwargs,
     ):
+        """Execute the feature engineering agent workflow.
+
+        Args:
+            data_raw: The raw data to process.
+            target_variable: Optional target variable for supervised learning.
+            user_instructions: Optional user instructions.
+            max_retries: Maximum number of retries.
+            retry_count: Current retry count.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Updated workflow state.
+
+        """
         self.response = self.invoke(
             {
                 "messages": [("user", user_instructions)] if user_instructions else [],
@@ -88,7 +121,8 @@ class FeatureEngineeringAgent(BaseAgent):
         self.response = None
         return make_feature_engineering_agent(**self._params)
 
-def make_feature_engineering_agent(
+
+def make_feature_engineering_agent(  # noqa: C901 - complex agent setup is intentional
     model,
     n_samples=30,
     log=False,
@@ -101,6 +135,25 @@ def make_feature_engineering_agent(
     bypass_explain_code=False,
     checkpointer: Checkpointer = None,
 ):
+    """Create a feature engineering agent for generating new features.
+
+    Args:
+        model: The language model to use.
+        n_samples: Number of samples to generate.
+        log: Whether to log output.
+        log_path: Path to log file.
+        file_name: Name of the generated file.
+        function_name: Name of the generated function.
+        overwrite: Whether to overwrite existing files.
+        human_in_the_loop: Whether to enable human-in-the-loop.
+        bypass_recommended_steps: Whether to bypass recommended steps.
+        bypass_explain_code: Whether to bypass code explanation.
+        checkpointer: Checkpointer to use.
+
+    Returns:
+        Compiled feature engineering agent.
+
+    """
     llm = model
     MAX_SUMMARY_COLUMNS = 30
 
@@ -129,9 +182,8 @@ def make_feature_engineering_agent(
         MAX_CHARS = 5000
         return summary[:MAX_CHARS]
 
-    if human_in_the_loop:
-        if checkpointer is None:
-            checkpointer = MemorySaver()
+    if human_in_the_loop and checkpointer is None:
+        checkpointer = MemorySaver()
 
     if log:
         if log_path is None:
@@ -163,7 +215,7 @@ def make_feature_engineering_agent(
             template="""
             You are a Feature Engineering Expert. Given the following information about data and user instructions,
             recommend a series of steps to create meaningful features for machine learning.
-            
+
             General Feature Engineering Operations:
             * Create interaction features between variables
             * Generate polynomial features for numeric variables
@@ -172,12 +224,12 @@ def make_feature_engineering_agent(
             * Create aggregate features by grouping
             * Apply scaling and normalization
             * Handle text features if present
-            
+
             Custom Steps:
             * Analyze target variable if provided for supervised feature creation
             * Consider domain-specific feature creation
             * Recommend features that improve model performance
-            
+
             User instructions:
             {user_instructions}
 
@@ -206,14 +258,12 @@ def make_feature_engineering_agent(
         all_datasets_summary_str = _summarize_df_for_prompt(df)
 
         steps_agent = recommend_steps_prompt | llm
-        recommended_steps = steps_agent.invoke(
-            {
-                "user_instructions": state.get("user_instructions"),
-                "target_variable": state.get("target_variable"),
-                "recommended_steps": state.get("recommended_steps"),
-                "all_datasets_summary": all_datasets_summary_str,
-            }
-        )
+        recommended_steps = steps_agent.invoke({
+            "user_instructions": state.get("user_instructions"),
+            "target_variable": state.get("target_variable"),
+            "recommended_steps": state.get("recommended_steps"),
+            "all_datasets_summary": all_datasets_summary_str,
+        })
 
         return {
             "recommended_steps": format_recommended_steps(
@@ -276,15 +326,13 @@ def make_feature_engineering_agent(
 
         feature_engineering_agent = feature_engineering_prompt | llm | PythonOutputParser()
 
-        response = feature_engineering_agent.invoke(
-            {
-                "recommended_steps": steps_for_prompt,
-                "user_instructions": state.get("user_instructions"),
-                "target_variable": state.get("target_variable"),
-                "all_datasets_summary": all_datasets_summary_str,
-                "function_name": function_name,
-            }
-        )
+        response = feature_engineering_agent.invoke({
+            "recommended_steps": steps_for_prompt,
+            "user_instructions": state.get("user_instructions"),
+            "target_variable": state.get("target_variable"),
+            "all_datasets_summary": all_datasets_summary_str,
+            "function_name": function_name,
+        })
 
         response = relocate_imports_inside_function(response)
         response = add_comments_to_top(response, agent_name=AGENT_NAME)
@@ -320,9 +368,10 @@ def make_feature_engineering_agent(
         if error is None:
             try:
                 data_featured = result if isinstance(result, dict) else {}
-                return {"data_featured": data_featured}
             except Exception as e:
-                return {"data_featured": {}, "feature_engineer_error": f"Error processing featured data: {str(e)}"}
+                return {"data_featured": {}, "feature_engineer_error": f"Error processing featured data: {e!s}"}
+            else:
+                return {"data_featured": data_featured}
         else:
             return {"data_featured": {}, "feature_engineer_error": f"Feature engineering execution error: {error}"}
 
@@ -330,19 +379,25 @@ def make_feature_engineering_agent(
     workflow.add_node("recommend_feature_steps", recommend_feature_steps)
     workflow.add_node("create_feature_engineer_code", create_feature_engineer_code)
     workflow.add_node("execute_feature_engineer_code", execute_feature_engineer_code)
-    workflow.add_node("report_agent_outputs", lambda state: node_func_report_agent_outputs(state, [
-        "recommended_steps",
-        "feature_engineer_function",
-        "feature_engineer_function_path",
-        "feature_engineer_function_name",
-        "feature_engineer_error",
-        "data_featured",
-    ]))
-    
+    workflow.add_node(
+        "report_agent_outputs",
+        lambda state: node_func_report_agent_outputs(
+            state,
+            [
+                "recommended_steps",
+                "feature_engineer_function",
+                "feature_engineer_function_path",
+                "feature_engineer_function_name",
+                "feature_engineer_error",
+                "data_featured",
+            ],
+        ),
+    )
+
     workflow.add_edge(START, "recommend_feature_steps")
     workflow.add_edge("recommend_feature_steps", "create_feature_engineer_code")
     workflow.add_edge("create_feature_engineer_code", "execute_feature_engineer_code")
     workflow.add_edge("execute_feature_engineer_code", "report_agent_outputs")
     workflow.add_edge("report_agent_outputs", END)
-    
+
     return workflow.compile()

@@ -1,37 +1,35 @@
-from typing_extensions import TypedDict, Annotated, Sequence, Literal
+"""Workflow planner agent for orchestrating data science workflows.
+
+Provides specialized agent capabilities for planning and coordinating
+complex data science workflows with multiple stages and dependencies.
+"""
+
 import operator
-from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import BaseMessage
-from langgraph.types import Command
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Checkpointer
 import os
-import json
-import pandas as pd
+from collections.abc import Sequence
+from typing import Annotated
+
+from langchain_core.messages import BaseMessage  # type: ignore[import]
+from langchain_core.prompts import PromptTemplate  # type: ignore[import]
+from langgraph.checkpoint.memory import MemorySaver  # type: ignore[import]
+from langgraph.graph import END, START, StateGraph  # type: ignore[import]
+from langgraph.types import Checkpointer  # type: ignore[import]
+from typing_extensions import TypedDict
+
 from data_science_team_agent.templates import (
-    node_func_human_review,
-    node_func_fix_agent_code,
-    node_func_report_agent_outputs,
-    create_coding_agent_graph,
     BaseAgent,
 )
-from data_science_team_agent.parsers.parsers import PythonOutputParser
 from data_science_team_agent.utils.regex import (
-    relocate_imports_inside_function,
-    add_comments_to_top,
     format_agent_name,
-    format_recommended_steps,
-    get_generic_summary,
 )
-from data_science_team_agent.tools.dataframe import get_dataframe_summary
-from data_science_team_agent.utils.logging import log_ai_function, log_ai_error
-from data_science_team_agent.utils.sandbox import run_code_sandboxed_subprocess
-from data_science_team_agent.utils.messages import get_last_user_message_content
 
 AGENT_NAME = "workflow_planner_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
+
 class WorkflowPlannerAgent(BaseAgent):
+    """Agent for planning data science workflows."""
+
     def __init__(
         self,
         model,
@@ -46,6 +44,22 @@ class WorkflowPlannerAgent(BaseAgent):
         bypass_explain_code=False,
         checkpointer: Checkpointer = None,
     ):
+        """Initialize the workflow planner agent.
+
+        Args:
+            model: The language model to use
+            n_samples: Number of samples to generate
+            log: Whether to log output
+            log_path: Path to log file
+            file_name: Name of the generated file
+            function_name: Name of the generated function
+            overwrite: Whether to overwrite existing files
+            human_in_the_loop: Whether to enable human-in-the-loop
+            bypass_recommended_steps: Whether to bypass recommended steps
+            bypass_explain_code: Whether to bypass code explanation
+            checkpointer: Checkpointer to use
+
+        """
         self._params = {
             "model": model,
             "n_samples": n_samples,
@@ -64,11 +78,22 @@ class WorkflowPlannerAgent(BaseAgent):
 
     def invoke_agent(
         self,
-        user_instructions: str = None,
+        user_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         **kwargs,
     ):
+        """Execute the agent workflow.
+
+        Args:
+            user_instructions: Optional user instructions. Defaults to None.
+            max_retries: Maximum number of retries. Defaults to 3.
+            retry_count: Current retry count. Defaults to 0.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Updated workflow state.
+        """
         self.response = self.invoke(
             {
                 "messages": [("user", user_instructions)] if user_instructions else [],
@@ -84,6 +109,7 @@ class WorkflowPlannerAgent(BaseAgent):
         self.response = None
         return make_workflow_planner_agent(**self._params)
 
+
 def make_workflow_planner_agent(
     model,
     n_samples=30,
@@ -97,11 +123,28 @@ def make_workflow_planner_agent(
     bypass_explain_code=False,
     checkpointer: Checkpointer = None,
 ):
+    """Create a workflow planner agent.
+
+    Args:
+        model: The language model to use.
+        n_samples: Number of samples to process. Defaults to 30.
+        log: Whether to enable logging. Defaults to False.
+        log_path: Path to log file. Defaults to None.
+        file_name: Name of the output file. Defaults to "workflow_plan.py".
+        function_name: Name of the function. Defaults to "workflow_planner".
+        overwrite: Whether to overwrite existing files. Defaults to True.
+        human_in_the_loop: Whether to enable human-in-the-loop. Defaults to False.
+        bypass_recommended_steps: Whether to bypass recommended steps. Defaults to False.
+        bypass_explain_code: Whether to bypass code explanation. Defaults to False.
+        checkpointer: Checkpointer for state management. Defaults to None.
+
+    Returns:
+        Compiled workflow planner agent graph.
+    """
     llm = model
 
-    if human_in_the_loop:
-        if checkpointer is None:
-            checkpointer = MemorySaver()
+    if human_in_the_loop and checkpointer is None:
+        checkpointer = MemorySaver()
 
     if log:
         if log_path is None:
@@ -130,7 +173,7 @@ def make_workflow_planner_agent(
             template="""
             You are a Data Science Workflow Planner. Given the following user instructions,
             create a comprehensive plan for data analysis and processing.
-            
+
             Workflow Planning Considerations:
             * Break down complex tasks into manageable steps
             * Identify required data processing operations
@@ -138,7 +181,7 @@ def make_workflow_planner_agent(
             * Consider visualization and reporting needs
             * Estimate computational requirements
             * Plan for validation and testing
-            
+
             User instructions:
             {user_instructions}
 
@@ -148,7 +191,7 @@ def make_workflow_planner_agent(
             3. Required tools and techniques
             4. Expected outputs and deliverables
             5. Potential challenges and mitigation strategies
-            
+
             Format as a structured plan that can guide the data science process.
             """,
             input_variables=[
@@ -178,9 +221,9 @@ def make_workflow_planner_agent(
     workflow = StateGraph(GraphState, checkpointer=checkpointer)
     workflow.add_node("create_workflow_plan", create_workflow_plan)
     workflow.add_node("report_outputs", report_outputs)
-    
+
     workflow.add_edge(START, "create_workflow_plan")
     workflow.add_edge("create_workflow_plan", "report_outputs")
     workflow.add_edge("report_outputs", END)
-    
+
     return workflow.compile()

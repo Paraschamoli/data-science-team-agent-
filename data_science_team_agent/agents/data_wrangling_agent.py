@@ -1,37 +1,45 @@
-from typing_extensions import TypedDict, Annotated, Sequence, Literal
+"""Data wrangling agent for automated data transformation operations.
+
+Provides specialized agent capabilities for transforming and cleaning
+data with automated workflows including filtering, aggregation,
+and feature engineering.
+"""
+
 import operator
-from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import BaseMessage
-from langgraph.types import Command
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Checkpointer
 import os
-import json
+from collections.abc import Sequence
+from typing import Annotated
+
 import pandas as pd
-from data_science_team_agent.templates import (
-    node_func_human_review,
-    node_func_fix_agent_code,
-    node_func_report_agent_outputs,
-    create_coding_agent_graph,
-    BaseAgent,
-)
+from langchain_core.messages import BaseMessage  # type: ignore[import]
+from langchain_core.prompts import PromptTemplate  # type: ignore[import]
+from langgraph.checkpoint.memory import MemorySaver  # type: ignore[import]
+from langgraph.graph import END, START, StateGraph  # type: ignore[import]
+from langgraph.types import Checkpointer  # type: ignore[import]
+from typing_extensions import TypedDict
+
 from data_science_team_agent.parsers.parsers import PythonOutputParser
+from data_science_team_agent.templates import (
+    BaseAgent,
+    node_func_report_agent_outputs,
+)
+from data_science_team_agent.tools.dataframe import get_dataframe_summary
+from data_science_team_agent.utils.logging import log_ai_function
 from data_science_team_agent.utils.regex import (
-    relocate_imports_inside_function,
     add_comments_to_top,
     format_agent_name,
     format_recommended_steps,
-    get_generic_summary,
+    relocate_imports_inside_function,
 )
-from data_science_team_agent.tools.dataframe import get_dataframe_summary
-from data_science_team_agent.utils.logging import log_ai_function, log_ai_error
 from data_science_team_agent.utils.sandbox import run_code_sandboxed_subprocess
-from data_science_team_agent.utils.messages import get_last_user_message_content
 
 AGENT_NAME = "data_wrangling_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
+
 class DataWranglingAgent(BaseAgent):
+    """Agent for data wrangling and transformation operations."""
+
     def __init__(
         self,
         model,
@@ -46,6 +54,21 @@ class DataWranglingAgent(BaseAgent):
         bypass_explain_code=False,
         checkpointer: Checkpointer = None,
     ):
+        """Initialize the data wrangling agent.
+
+        Args:
+            model: The language model to use.
+            n_samples: Number of samples to process. Defaults to 30.
+            log: Whether to enable logging. Defaults to False.
+            log_path: Path to log file. Defaults to None.
+            file_name: Name of the output file. Defaults to "data_wrangler.py".
+            function_name: Name of the function. Defaults to "data_wrangler".
+            overwrite: Whether to overwrite existing files. Defaults to True.
+            human_in_the_loop: Whether to enable human-in-the-loop. Defaults to False.
+            bypass_recommended_steps: Whether to bypass recommended steps. Defaults to False.
+            bypass_explain_code: Whether to bypass code explanation. Defaults to False.
+            checkpointer: Checkpointer for state management. Defaults to None.
+        """
         self._params = {
             "model": model,
             "n_samples": n_samples,
@@ -65,11 +88,23 @@ class DataWranglingAgent(BaseAgent):
     def invoke_agent(
         self,
         data_raw: pd.DataFrame,
-        user_instructions: str = None,
+        user_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         **kwargs,
     ):
+        """Execute the agent workflow.
+
+        Args:
+            data_raw: Raw pandas DataFrame to wrangle.
+            user_instructions: Optional user instructions. Defaults to None.
+            max_retries: Maximum number of retries. Defaults to 3.
+            retry_count: Current retry count. Defaults to 0.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Updated workflow state.
+        """
         self.response = self.invoke(
             {
                 "messages": [("user", user_instructions)] if user_instructions else [],
@@ -86,7 +121,8 @@ class DataWranglingAgent(BaseAgent):
         self.response = None
         return make_data_wrangling_agent(**self._params)
 
-def make_data_wrangling_agent(
+
+def make_data_wrangling_agent(  # noqa: C901 - complex agent setup is intentional
     model,
     n_samples=30,
     log=False,
@@ -99,6 +135,24 @@ def make_data_wrangling_agent(
     bypass_explain_code=False,
     checkpointer: Checkpointer = None,
 ):
+    """Create a data wrangling agent.
+
+    Args:
+        model: The language model to use.
+        n_samples: Number of samples to process. Defaults to 30.
+        log: Whether to enable logging. Defaults to False.
+        log_path: Path to log file. Defaults to None.
+        file_name: Name of the output file. Defaults to "data_wrangler.py".
+        function_name: Name of the function. Defaults to "data_wrangler".
+        overwrite: Whether to overwrite existing files. Defaults to True.
+        human_in_the_loop: Whether to enable human-in-the-loop. Defaults to False.
+        bypass_recommended_steps: Whether to bypass recommended steps. Defaults to False.
+        bypass_explain_code: Whether to bypass code explanation. Defaults to False.
+        checkpointer: Checkpointer for state management. Defaults to None.
+
+    Returns:
+        Compiled data wrangling agent graph.
+    """
     llm = model
     MAX_SUMMARY_COLUMNS = 30
 
@@ -126,9 +180,8 @@ def make_data_wrangling_agent(
         MAX_CHARS = 5000
         return summary[:MAX_CHARS]
 
-    if human_in_the_loop:
-        if checkpointer is None:
-            checkpointer = MemorySaver()
+    if human_in_the_loop and checkpointer is None:
+        checkpointer = MemorySaver()
 
     if log:
         if log_path is None:
@@ -159,7 +212,7 @@ def make_data_wrangling_agent(
             template="""
             You are a Data Wrangling Expert. Given the following information about data and user instructions,
             recommend a series of steps to transform and manipulate the data.
-            
+
             General Wrangling Operations:
             * Filtering data based on conditions
             * Sorting data for analysis
@@ -167,12 +220,12 @@ def make_data_wrangling_agent(
             * Feature engineering and column creation
             * Data merging and joining operations
             * Pivoting and reshaping data
-            
+
             Custom Steps:
             * Analyze user instructions to understand specific transformation needs
             * Recommend operations that achieve the user's goals
             * Consider data types and structure for appropriate operations
-            
+
             User instructions:
             {user_instructions}
 
@@ -197,13 +250,11 @@ def make_data_wrangling_agent(
         all_datasets_summary_str = _summarize_df_for_prompt(df)
 
         steps_agent = recommend_steps_prompt | llm
-        recommended_steps = steps_agent.invoke(
-            {
-                "user_instructions": state.get("user_instructions"),
-                "recommended_steps": state.get("recommended_steps"),
-                "all_datasets_summary": all_datasets_summary_str,
-            }
-        )
+        recommended_steps = steps_agent.invoke({
+            "user_instructions": state.get("user_instructions"),
+            "recommended_steps": state.get("recommended_steps"),
+            "all_datasets_summary": all_datasets_summary_str,
+        })
 
         return {
             "recommended_steps": format_recommended_steps(
@@ -261,14 +312,12 @@ def make_data_wrangling_agent(
 
         data_wrangling_agent = data_wrangling_prompt | llm | PythonOutputParser()
 
-        response = data_wrangling_agent.invoke(
-            {
-                "recommended_steps": steps_for_prompt,
-                "user_instructions": state.get("user_instructions"),
-                "all_datasets_summary": all_datasets_summary_str,
-                "function_name": function_name,
-            }
-        )
+        response = data_wrangling_agent.invoke({
+            "recommended_steps": steps_for_prompt,
+            "user_instructions": state.get("user_instructions"),
+            "all_datasets_summary": all_datasets_summary_str,
+            "function_name": function_name,
+        })
 
         response = relocate_imports_inside_function(response)
         response = add_comments_to_top(response, agent_name=AGENT_NAME)
@@ -304,9 +353,10 @@ def make_data_wrangling_agent(
         if error is None:
             try:
                 data_processed = result if isinstance(result, dict) else {}
-                return {"data_processed": data_processed}
             except Exception as e:
-                return {"data_processed": {}, "data_wrangler_error": f"Error processing wrangled data: {str(e)}"}
+                return {"data_processed": {}, "data_wrangler_error": f"Error processing wrangled data: {e!s}"}
+            else:
+                return {"data_processed": data_processed}
         else:
             return {"data_processed": {}, "data_wrangler_error": f"Wrangling execution error: {error}"}
 
@@ -314,19 +364,25 @@ def make_data_wrangling_agent(
     workflow.add_node("recommend_wrangling_steps", recommend_wrangling_steps)
     workflow.add_node("create_wrangler_code", create_wrangler_code)
     workflow.add_node("execute_wrangler_code", execute_wrangler_code)
-    workflow.add_node("report_agent_outputs", lambda state: node_func_report_agent_outputs(state, [
-        "recommended_steps",
-        "data_wrangler_function",
-        "data_wrangler_function_path",
-        "data_wrangler_function_name",
-        "data_wrangler_error",
-        "data_processed",
-    ]))
-    
+    workflow.add_node(
+        "report_agent_outputs",
+        lambda state: node_func_report_agent_outputs(
+            state,
+            [
+                "recommended_steps",
+                "data_wrangler_function",
+                "data_wrangler_function_path",
+                "data_wrangler_function_name",
+                "data_wrangler_error",
+                "data_processed",
+            ],
+        ),
+    )
+
     workflow.add_edge(START, "recommend_wrangling_steps")
     workflow.add_edge("recommend_wrangling_steps", "create_wrangler_code")
     workflow.add_edge("create_wrangler_code", "execute_wrangler_code")
     workflow.add_edge("execute_wrangler_code", "report_agent_outputs")
     workflow.add_edge("report_agent_outputs", END)
-    
+
     return workflow.compile()

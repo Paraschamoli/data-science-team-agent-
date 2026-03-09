@@ -1,7 +1,7 @@
 site_name: data-science-team-agent
 repo_url: https://github.com/Paraschamoli/data-science-team-agent
 site_url: https://Paraschamoli.github.io/data-science-team-agent
-site_description: AI Data Science Team is a Python library of specialized agents for common data science workflows, plus a flagship app: AI Pipeline Studio. The Studio turns your work into a visual, reproducible pipeline, while the AI team handles data loading, cleaning, visualization, and modeling.
+site_description: "AI Data Science Team is a Python library of specialized agents for common data science workflows, plus a flagship app: AI Pipeline Studio. The Studio turns your work into a visual, reproducible pipeline, while the AI team handles data loading, cleaning, visualization, and modeling."
 site_author: Paras Chamoli
 edit_uri: edit/main/docs/
 repo_name: Paraschamoli/data-science-team-agent

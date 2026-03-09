@@ -15,15 +15,9 @@
 #  Thank you users! We ❤️ you! - 🌻
 
 
-
-"""data-science-team-agent - An Bindu Agent.
-
-"""
-
-
+"""data-science-team-agent - An Bindu Agent."""
 
 from data_science_team_agent.__version__ import __version__
-
 from data_science_team_agent.main import (
     handler,
     initialize_agent,
@@ -36,4 +30,3 @@ __all__ = [
     "initialize_agent",
     "main",
 ]
-

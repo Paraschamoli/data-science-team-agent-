@@ -1,5 +1,12 @@
-from typing import Sequence, List
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+"""Message utilities for handling conversation messages.
+
+Provides helper functions to extract content from different
+types of messages in conversation sequences.
+"""
+
+from collections.abc import Sequence
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage  # type: ignore[import]
 
 
 def get_last_user_message_content(messages: Sequence[BaseMessage]) -> str:
@@ -32,7 +39,7 @@ def format_messages_for_prompt(messages: Sequence[BaseMessage]) -> str:
             formatted.append(f"Human: {msg.content}")
         elif isinstance(msg, AIMessage):
             formatted.append(f"AI: {msg.content}")
-    
+
     return "\n".join(formatted)
 
 
@@ -46,12 +53,12 @@ def create_message_from_content(content: str, role: str = "user") -> BaseMessage
         return HumanMessage(content=content)  # Default to user
 
 
-def get_tool_call_names(messages: Sequence[BaseMessage]) -> List[str]:
+def get_tool_call_names(messages: Sequence[BaseMessage]) -> list[str]:
     """Get names of tool calls from a sequence of messages."""
     tool_names = []
     for message in messages:
-        if hasattr(message, 'tool_calls') and message.tool_calls:
+        if hasattr(message, "tool_calls") and message.tool_calls:
             for tool_call in message.tool_calls:
-                if hasattr(tool_call, 'name'):
+                if hasattr(tool_call, "name"):
                     tool_names.append(tool_call.name)
     return tool_names

@@ -5,17 +5,17 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
+import pandas as pd
 from bindu.penguin.bindufy import bindufy
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-import pandas as pd
-import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -77,13 +77,11 @@ async def initialize_agent() -> None:
     model_name = os.getenv("MODEL_NAME", "anthropic/claude-3.5-sonnet")
 
     if not openrouter_api_key:
-        raise ValueError("OPENROUTER_API_KEY required. Get your API key from: https://openrouter.ai/keys")
+        error_msg = "OPENROUTER_API_KEY required. Get your API key from: https://openrouter.ai/keys"
+        raise ValueError(error_msg)
 
     # Initialize OpenAI client via OpenRouter
-    client = AsyncOpenAI(
-        api_key=openrouter_api_key,
-        base_url="https://openrouter.ai/api/v1"
-    )
+    client = AsyncOpenAI(api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
     print(f"✅ Using OpenRouter model: {model_name}")
 
     # Create the data science agent
@@ -93,8 +91,16 @@ async def initialize_agent() -> None:
 
 class DataScienceAgent:
     """Data Science Agent that handles all data science tasks."""
-    
+
     def __init__(self, client: AsyncOpenAI, model_name: str, mem0_api_key: str | None = None):
+        """Initialize the Data Science Agent.
+
+        Args:
+            client: AsyncOpenAI client for API calls
+            model_name: Name of the model to use
+            mem0_api_key: Optional API key for memory management
+
+        """
         self.client = client
         self.model_name = model_name
         self.mem0_api_key = mem0_api_key
@@ -124,7 +130,7 @@ class DataScienceAgent:
             - Optimizing data pipelines
             - Providing actionable insights\
         """)
-        
+
         self.instructions = dedent("""\
             1. Data Loading & Inspection 🔍
                - Load data from provided URL or source
@@ -162,69 +168,69 @@ class DataScienceAgent:
             - Suggest practical applications
             - Format output for readability\
         """)
-    
+
     async def arun(self, messages: list[dict[str, str]]) -> Any:
         """Run the agent with the given messages using standard format."""
         # Extract user text from standard message format [{"role": "user", "content": "..."}]
         user_text = ""
-        
+
         for message in messages:
             if isinstance(message, dict) and message.get("role") == "user":
                 user_text = message.get("content", "")
                 break
-        
+
         if not user_text:
             return {"text": "No user message found. Please provide a data science task or question."}
-        
+
         print(f"🔍 Processing request: '{user_text[:100]}...'")
-        
+
         try:
             # Check if URL is provided
-            url_match = re.search(r'https://[^\s]+', user_text)
+            url_match = re.search(r"https://[^\s]+", user_text)
             df = None
-            
+
             if url_match:
                 url = url_match.group(0)
                 try:
                     df = pd.read_csv(url)
                     print(f"📊 Loaded DataFrame with shape: {df.shape}")
                 except Exception as e:
-                    return {"text": f"❌ Error loading data from URL: {str(e)}"}
-            
+                    return {"text": f"❌ Error loading data from URL: {e!s}"}
+
             # Create analysis prompt
             analysis_prompt = self._create_analysis_prompt(user_text, df)
-            
+
             # Use the model to analyze the request
             response = await self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": f"{self.description}\n\n{self.instructions}"},
-                    {"role": "user", "content": analysis_prompt}
+                    {"role": "user", "content": analysis_prompt},
                 ],
                 temperature=0.1,
-                max_tokens=4000
+                max_tokens=4000,
             )
-            
+
             # Extract the analysis content
             analysis_content = response.choices[0].message.content
-            
+
             # Return response with content field for frontend compatibility
             class AgentResponse:
                 def __init__(self, content):
                     self.content = content
-            
+
             return AgentResponse(f"🧹 **Data Science Analysis Completed**\n\n{analysis_content}")
-            
+
         except Exception as e:
-            error_msg = f"❌ Error during analysis: {str(e)}"
+            error_msg = f"❌ Error during analysis: {e!s}"
             print(error_msg)
-            
+
             class ErrorResponse:
                 def __init__(self, content):
                     self.content = content
-            
+
             return ErrorResponse(error_msg)
-    
+
     def _create_analysis_prompt(self, user_request: str, df: pd.DataFrame | None) -> str:
         """Create a comprehensive analysis prompt."""
         if df is not None:
@@ -241,12 +247,12 @@ class DataScienceAgent:
             """
         else:
             data_info = "No dataset provided. Working with general data science guidance."
-        
+
         prompt = f"""
         User Request: {user_request}
-        
+
         {data_info}
-        
+
         Please provide a comprehensive data science response including:
         1. Clear explanation of your approach
         2. Step-by-step methodology
@@ -254,10 +260,10 @@ class DataScienceAgent:
         4. Statistical insights and interpretations
         5. Visualization recommendations
         6. Next steps and best practices
-        
+
         Format your response professionally with clear sections and code blocks where appropriate.
         """
-        
+
         return prompt
 
 

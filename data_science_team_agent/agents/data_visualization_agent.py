@@ -1,40 +1,40 @@
-from typing_extensions import TypedDict, Annotated, Sequence, Literal
+"""Data visualization agent for creating charts and plots."""
+
 import operator
-from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import BaseMessage
-from langgraph.types import Command
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Checkpointer
 import os
-import json
-import difflib
-import re
+from collections.abc import Sequence
+from typing import Annotated
+
 import pandas as pd
-from data_science_team_agent.templates import (
-    node_func_human_review,
-    node_func_fix_agent_code,
-    node_func_report_agent_outputs,
-    create_coding_agent_graph,
-    BaseAgent,
-)
+from langchain_core.messages import BaseMessage  # type: ignore[import]
+from langchain_core.prompts import PromptTemplate  # type: ignore[import]
+from langgraph.checkpoint.memory import MemorySaver  # type: ignore[import]
+from langgraph.graph import END, START, StateGraph  # type: ignore[import]
+from langgraph.types import Checkpointer  # type: ignore[import]
+from typing_extensions import TypedDict
+
 from data_science_team_agent.parsers.parsers import PythonOutputParser
+from data_science_team_agent.templates import (
+    BaseAgent,
+    node_func_report_agent_outputs,
+)
+from data_science_team_agent.tools.dataframe import get_dataframe_summary
+from data_science_team_agent.utils.logging import log_ai_function
 from data_science_team_agent.utils.regex import (
-    relocate_imports_inside_function,
     add_comments_to_top,
     format_agent_name,
     format_recommended_steps,
-    get_generic_summary,
+    relocate_imports_inside_function,
 )
-from data_science_team_agent.tools.dataframe import get_dataframe_summary
-from data_science_team_agent.utils.logging import log_ai_function, log_ai_error
-from data_science_team_agent.utils.plotly import plotly_from_dict
 from data_science_team_agent.utils.sandbox import run_code_sandboxed_subprocess
-from data_science_team_agent.utils.messages import get_last_user_message_content
 
 AGENT_NAME = "data_visualization_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
+
 class DataVisualizationAgent(BaseAgent):
+    """Agent responsible for creating data visualizations and charts."""
+
     def __init__(
         self,
         model,
@@ -49,6 +49,22 @@ class DataVisualizationAgent(BaseAgent):
         bypass_explain_code=False,
         checkpointer: Checkpointer = None,
     ):
+        """Initialize the data visualization agent.
+
+        Args:
+            model: The language model to use.
+            n_samples: Number of samples to generate.
+            log: Whether to log output.
+            log_path: Path to log file.
+            file_name: Name of the generated file.
+            function_name: Name of the generated function.
+            overwrite: Whether to overwrite existing files.
+            human_in_the_loop: Whether to enable human-in-the-loop.
+            bypass_recommended_steps: Whether to bypass recommended steps.
+            bypass_explain_code: Whether to bypass code explanation.
+            checkpointer: Checkpointer to use.
+
+        """
         self._params = {
             "model": model,
             "n_samples": n_samples,
@@ -68,11 +84,24 @@ class DataVisualizationAgent(BaseAgent):
     def invoke_agent(
         self,
         data_raw: pd.DataFrame,
-        user_instructions: str = None,
+        user_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         **kwargs,
     ):
+        """Execute the data visualization agent workflow.
+
+        Args:
+            data_raw: The raw data to visualize.
+            user_instructions: Optional user instructions.
+            max_retries: Maximum number of retries.
+            retry_count: Current retry count.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Updated workflow state.
+
+        """
         self.response = self.invoke(
             {
                 "messages": [("user", user_instructions)] if user_instructions else [],
@@ -89,7 +118,8 @@ class DataVisualizationAgent(BaseAgent):
         self.response = None
         return make_data_visualization_agent(**self._params)
 
-def make_data_visualization_agent(
+
+def make_data_visualization_agent(  # noqa: C901 - complex agent setup is intentional
     model,
     n_samples=30,
     log=False,
@@ -102,6 +132,25 @@ def make_data_visualization_agent(
     bypass_explain_code=False,
     checkpointer: Checkpointer = None,
 ):
+    """Create a data visualization agent for generating charts and plots.
+
+    Args:
+        model: The language model to use.
+        n_samples: Number of samples to generate.
+        log: Whether to log output.
+        log_path: Path to log file.
+        file_name: Name of the generated file.
+        function_name: Name of the generated function.
+        overwrite: Whether to overwrite existing files.
+        human_in_the_loop: Whether to enable human-in-the-loop.
+        bypass_recommended_steps: Whether to bypass recommended steps.
+        bypass_explain_code: Whether to bypass code explanation.
+        checkpointer: Checkpointer to use.
+
+    Returns:
+        Compiled data visualization agent.
+
+    """
     llm = model
     MAX_SUMMARY_COLUMNS = 30
 
@@ -127,9 +176,8 @@ def make_data_visualization_agent(
         MAX_CHARS = 5000
         return summary[:MAX_CHARS]
 
-    if human_in_the_loop:
-        if checkpointer is None:
-            checkpointer = MemorySaver()
+    if human_in_the_loop and checkpointer is None:
+        checkpointer = MemorySaver()
 
     if log:
         if log_path is None:
@@ -160,18 +208,18 @@ def make_data_visualization_agent(
             template="""
             You are a Data Visualization Expert. Given the following information about data and user instructions,
             recommend a series of steps to create effective visualizations.
-            
+
             General Visualization Guidelines:
             * Analyze data to determine appropriate chart types (bar, scatter, line, histogram, box, heatmap)
             * Create user-friendly titles and axis labels
             * Apply consistent styling and color themes
             * Handle theme details appropriately
-            
+
             Custom Steps:
             * Analyze user instructions to understand specific visualization requirements
             * Recommend chart types that best represent the data and user needs
             * Consider data types (categorical vs numerical) for chart selection
-            
+
             User instructions:
             {user_instructions}
 
@@ -196,13 +244,11 @@ def make_data_visualization_agent(
         all_datasets_summary_str = _summarize_df_for_prompt(df)
 
         steps_agent = recommend_steps_prompt | llm
-        recommended_steps = steps_agent.invoke(
-            {
-                "user_instructions": state.get("user_instructions"),
-                "recommended_steps": state.get("recommended_steps"),
-                "all_datasets_summary": all_datasets_summary_str,
-            }
-        )
+        recommended_steps = steps_agent.invoke({
+            "user_instructions": state.get("user_instructions"),
+            "recommended_steps": state.get("recommended_steps"),
+            "all_datasets_summary": all_datasets_summary_str,
+        })
 
         return {
             "recommended_steps": format_recommended_steps(
@@ -261,14 +307,12 @@ def make_data_visualization_agent(
 
         data_visualization_agent = data_visualization_prompt | llm | PythonOutputParser()
 
-        response = data_visualization_agent.invoke(
-            {
-                "recommended_steps": steps_for_prompt,
-                "user_instructions": state.get("user_instructions"),
-                "all_datasets_summary": all_datasets_summary_str,
-                "function_name": function_name,
-            }
-        )
+        response = data_visualization_agent.invoke({
+            "recommended_steps": steps_for_prompt,
+            "user_instructions": state.get("user_instructions"),
+            "all_datasets_summary": all_datasets_summary_str,
+            "function_name": function_name,
+        })
 
         response = relocate_imports_inside_function(response)
         response = add_comments_to_top(response, agent_name=AGENT_NAME)
@@ -304,9 +348,10 @@ def make_data_visualization_agent(
         if error is None:
             try:
                 plot_data = result if isinstance(result, dict) else {}
-                return {"plot_data": plot_data}
             except Exception as e:
-                return {"plot_data": {}, "data_visualization_error": f"Error processing plot data: {str(e)}"}
+                return {"plot_data": {}, "data_visualization_error": f"Error processing plot data: {e!s}"}
+            else:
+                return {"plot_data": plot_data}
         else:
             return {"plot_data": {}, "data_visualization_error": f"Visualization execution error: {error}"}
 
@@ -314,19 +359,25 @@ def make_data_visualization_agent(
     workflow.add_node("recommend_visualization_steps", recommend_visualization_steps)
     workflow.add_node("create_visualization_code", create_visualization_code)
     workflow.add_node("execute_visualization_code", execute_visualization_code)
-    workflow.add_node("report_agent_outputs", lambda state: node_func_report_agent_outputs(state, [
-        "recommended_steps",
-        "data_visualization_function",
-        "data_visualization_function_path",
-        "data_visualization_function_name",
-        "data_visualization_error",
-        "plot_data",
-    ]))
-    
+    workflow.add_node(
+        "report_agent_outputs",
+        lambda state: node_func_report_agent_outputs(
+            state,
+            [
+                "recommended_steps",
+                "data_visualization_function",
+                "data_visualization_function_path",
+                "data_visualization_function_name",
+                "data_visualization_error",
+                "plot_data",
+            ],
+        ),
+    )
+
     workflow.add_edge(START, "recommend_visualization_steps")
     workflow.add_edge("recommend_visualization_steps", "create_visualization_code")
     workflow.add_edge("create_visualization_code", "execute_visualization_code")
     workflow.add_edge("execute_visualization_code", "report_agent_outputs")
     workflow.add_edge("report_agent_outputs", END)
-    
+
     return workflow.compile()
